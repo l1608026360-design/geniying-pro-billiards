@@ -163,6 +163,7 @@ export class BaseSocketTransport {
 
         cleanupPending();
         if (!this.intentionalSocketClose) {
+          this.attemptReconnect?.();
           this.onDisconnect({ kind: this.kind, message: '房间连接已断开' });
         }
       });
@@ -200,6 +201,12 @@ export class RelayTransport extends BaseSocketTransport {
   constructor({ getRelayUrl }) {
     super('relay');
     this.getRelayUrl = getRelayUrl;
+    this.reconnectAttempts = 0;
+    this.maxReconnectAttempts = 5;
+    this.reconnectDelay = 2000;
+    this.reconnectTimer = null;
+    this.pendingRoomCode = '';
+    this.pendingRole = '';
   }
 
   async createRoom({ state, roomCode = '' }) {
@@ -208,6 +215,8 @@ export class RelayTransport extends BaseSocketTransport {
       throw new Error('missing-relay-url');
     }
     await this.connect(socketUrl);
+    this.pendingRoomCode = roomCode;
+    this.pendingRole = 'host';
     this.send({ type: 'create-room', roomCode, state });
   }
 
@@ -217,7 +226,52 @@ export class RelayTransport extends BaseSocketTransport {
       throw new Error('missing-relay-url');
     }
     await this.connect(socketUrl);
+    this.pendingRoomCode = roomCode;
+    this.pendingRole = 'guest';
     this.send({ type: 'join-room', roomCode });
+  }
+
+  attemptReconnect() {
+    if (this.reconnectAttempts >= this.maxReconnectAttempts) {
+      this.reconnectAttempts = 0;
+      this.onStatus({ tone: 'error', message: '重连失败，请返回大厅重试', kind: this.kind });
+      return;
+    }
+    this.reconnectAttempts++;
+    const delay = this.reconnectDelay * Math.pow(1.5, this.reconnectAttempts - 1);
+
+    this.onStatus({
+      tone: 'warning',
+      message: `连接断开，${Math.round(delay / 1000)}秒后重连 (${this.reconnectAttempts}/${this.maxReconnectAttempts})`,
+      kind: this.kind,
+    });
+
+    this.reconnectTimer = setTimeout(async () => {
+      try {
+        const socketUrl = this.getRelayUrl();
+        if (!socketUrl) throw new Error('missing-relay-url');
+
+        await this.connect(socketUrl);
+        this.reconnectAttempts = 0;
+
+        if (this.pendingRoomCode) {
+          if (this.pendingRole === 'host') {
+            this.send({ type: 'create-room', roomCode: this.pendingRoomCode, state: null });
+          } else if (this.pendingRole === 'guest') {
+            this.send({ type: 'join-room', roomCode: this.pendingRoomCode });
+          }
+        }
+        this.onStatus({ tone: 'ok', message: '重连成功', kind: this.kind });
+      } catch {
+        this.attemptReconnect();
+      }
+    }, delay);
+  }
+
+  disconnect(options = {}) {
+    window.clearTimeout(this.reconnectTimer);
+    this.reconnectAttempts = 0;
+    return super.disconnect(options);
   }
 }
 
