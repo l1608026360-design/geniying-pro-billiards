@@ -1,0 +1,28 @@
+{
+  "name": "geniying-pro-billiards",
+  "version": "1.0.0",
+  "private": true,
+  "description": "GeniYing Pro Billiards with PWA install flow, Android LAN play, AI battles, and touch-first aiming guides.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite --host 0.0.0.0 --port 4173",
+    "build": "vite build",
+    "preview": "vite preview --host 0.0.0.0 --port 4173",
+    "server": "node server/index.js",
+    "serve:lan": "npm run build && node server/index.js",
+    "cap:sync": "npm run build && npx cap sync android",
+    "cap:add:android": "npx cap add android",
+    "cap:open:android": "npx cap open android",
+    "build:android:debug": "npm run build && npx cap sync android && cd android && gradlew.bat assembleDebug"
+  },
+  "dependencies": {
+    "@capacitor/android": "^8.3.4",
+    "@capacitor/core": "^8.3.4",
+    "ws": "^8.20.1"
+  },
+  "devDependencies": {
+    "@capacitor/cli": "^8.3.4",
+    "typescript": "^6.0.3",
+    "vite": "^8.0.13"
+  }
+}

@@ -1,0 +1,197 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover"
+    />
+    <meta name="theme-color" content="#0f7a42" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./icons/icon-192.png" />
+    <title>思颖竞技台球 | GeniYing Pro Billiards</title>
+  </head>
+  <body>
+    <div id="orientation-mask">
+      <div class="orientation-phone"></div>
+      <h1>请横屏游玩</h1>
+      <p>横屏时球台、瞄准线和拉杆弹力示意会完整展开，击球手感更稳定。</p>
+      <button id="force-landscape" class="primary-button" type="button">尝试横屏</button>
+      <small>如果手机锁定了竖屏，请先在系统控制中心关闭方向锁定。</small>
+    </div>
+
+    <div id="game-container">
+      <div id="table-wrapper">
+        <div id="cloth-wrapper">
+          <canvas id="gameCanvas"></canvas>
+        </div>
+      </div>
+
+      <div id="ui-layer">
+        <div class="hud-row top-row">
+          <button id="btn-back" class="hud-button danger" type="button">返回大厅</button>
+          <div class="hud-panel hero-status">
+            <span id="turn-indicator" data-tone="neutral">等待选择模式</span>
+          </div>
+          <div class="hud-panel room-status">
+            <span id="room-display">单机练习</span>
+          </div>
+        </div>
+
+        <div class="hud-row middle-row">
+          <div class="hud-panel compact">
+            <span class="label">当前阵营</span>
+            <strong id="role-display">红球方 (1-7)</strong>
+          </div>
+          <div class="hud-panel compact">
+            <span class="label">联机状态</span>
+            <strong id="network-status" data-tone="neutral">待命</strong>
+          </div>
+        </div>
+
+        <div id="toast"></div>
+        <div class="bottom-hint">按住白球附近向后拉杆，松手击球。瞄准时会显示目标球路线和分离角度虚线。</div>
+      </div>
+
+      <div id="lobby-modal" class="modal-overlay">
+        <div class="modal-shell lobby-shell">
+          <div class="brand-row">
+            <img class="brand-logo" src="./icons/icon-192.png" alt="思颖竞技台球" />
+            <div class="brand-copy">
+              <h1>思颖竞技台球</h1>
+              <p>GeniYing Pro Billiards</p>
+            </div>
+          </div>
+
+          <p class="hero-copy">
+            先用网页装到主屏幕试玩，真正的同 Wi-Fi 双手机联机放在 Android APK 里完成，支持同路由器和手机热点。
+          </p>
+
+          <div class="mode-stack">
+            <button id="btn-single" class="mode-button practice" type="button">
+              <span>练习模式</span>
+              <small>同机切换回合，适合先熟悉手感</small>
+            </button>
+            <button id="btn-ai" class="mode-button ai" type="button">
+              <span>AI 对战</span>
+              <small>带瞄准辅助、拉杆弹力提示和自由球处理</small>
+            </button>
+          </div>
+
+          <section id="native-lan-panel" class="panel-card hidden">
+            <div class="section-title">同 Wi-Fi 联机</div>
+            <p class="section-copy">两台安卓手机在同一个 Wi-Fi 或热点下，房主建房后，另一台直接扫描加入。</p>
+
+            <div class="native-fields">
+              <input
+                id="input-room-name"
+                type="text"
+                maxlength="24"
+                autocomplete="off"
+                placeholder="房间名称（可选，默认：思颖竞技台球房间）"
+              />
+            </div>
+
+            <div class="cta-row">
+              <button id="btn-host-lan" class="primary-button" type="button">创建局域网房间</button>
+              <button id="btn-scan-lan" class="secondary-button" type="button">扫描附近房间</button>
+            </div>
+
+            <div id="scan-status" class="helper-text">点击“扫描附近房间”后，会自动列出同网段正在广播的房主。</div>
+            <div id="room-list" class="room-list"></div>
+
+            <details class="server-card">
+              <summary>扫描不到时，手动输入 IP 兜底</summary>
+              <div class="server-fields">
+                <input id="input-manual-ip" type="text" autocomplete="off" placeholder="主机 IP，例如 192.168.43.1" />
+                <input id="input-manual-room" type="text" inputmode="numeric" maxlength="4" placeholder="4 位房号" />
+                <button id="btn-join-manual" class="primary-button" type="button">按 IP 加入</button>
+              </div>
+            </details>
+          </section>
+
+          <section id="pwa-panel" class="panel-card">
+            <div class="section-title">网页安装版</div>
+            <p class="section-copy">适合单机、AI 和后续下载 Android 局域网版。网页本身不承诺纯手机同 Wi-Fi 直连。</p>
+
+            <div class="cta-row">
+              <button id="btn-install-pwa" class="secondary-button" type="button">安装到主屏幕</button>
+              <a
+                id="btn-download-apk"
+                class="primary-link-button"
+                href="./downloads/geniying-pro-billiards-debug.apk"
+                download="geniying-pro-billiards-debug.apk"
+              >
+                下载 Android APK
+              </a>
+            </div>
+            <div id="install-note" class="helper-text">安装版会缓存到本地，离线也能继续练习和打 AI。</div>
+          </section>
+
+          <details id="relay-panel" class="server-card">
+            <summary>网页中继联机（测试入口）</summary>
+            <div class="server-fields">
+              <div class="cta-row relay-row">
+                <button id="btn-create-relay" class="primary-button" type="button">创建中继房间</button>
+              </div>
+
+              <div class="join-row">
+                <input
+                  id="input-relay-room"
+                  type="text"
+                  inputmode="numeric"
+                  maxlength="4"
+                  autocomplete="off"
+                  placeholder="输入 4 位房号"
+                />
+                <button id="btn-join-relay" class="primary-button" type="button">加入房间</button>
+              </div>
+
+              <input
+                id="input-relay-server"
+                type="text"
+                autocomplete="off"
+                placeholder="ws://局域网IP:8787/ws 或 wss://example.com/ws"
+              />
+              <div class="server-actions">
+                <button id="btn-save-relay" class="secondary-button" type="button">保存地址</button>
+                <button id="btn-reset-relay" class="secondary-button ghost" type="button">自动检测</button>
+              </div>
+              <div id="relay-server-display" class="server-display"></div>
+            </div>
+          </details>
+        </div>
+      </div>
+
+      <div id="waiting-modal" class="modal-overlay hidden">
+        <div class="modal-shell waiting-shell">
+          <div class="spinner"></div>
+          <h2 id="waiting-title">正在准备房间</h2>
+          <p id="waiting-copy">请稍等，房间信息正在同步。</p>
+
+          <button id="waiting-room-id" class="room-code-button" type="button">----</button>
+
+          <div class="waiting-meta">
+            <div>
+              <span class="label">房间名</span>
+              <strong id="waiting-room-name">思颖竞技台球房间</strong>
+            </div>
+            <div>
+              <span class="label">局域网地址</span>
+              <strong id="waiting-host-ip">--</strong>
+            </div>
+          </div>
+
+          <div class="waiting-actions">
+            <button id="btn-share-room" class="secondary-button" type="button">分享房间信息</button>
+            <button id="btn-cancel-waiting" class="secondary-button ghost" type="button">取消</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./src/main.js"></script>
+  </body>
+</html>
