@@ -12,8 +12,8 @@
     <link rel="manifest" href="./manifest.webmanifest" />
     <link rel="icon" href="./icons/icon-192.png" />
     <title>思颖竞技台球 | GeniYing Pro Billiards</title>
-    <script type="module" crossorigin src="./assets/index-Cq41bnNI.js"></script>
-    <link rel="stylesheet" crossorigin href="./assets/index-CPWT2z4v.css">
+    <script type="module" crossorigin src="./assets/index-C4agchdQ.js"></script>
+    <link rel="stylesheet" crossorigin href="./assets/index-aJVLyHY0.css">
   </head>
   <body>
     <div id="orientation-mask">
@@ -189,6 +189,19 @@
           <div class="waiting-actions">
             <button id="btn-share-room" class="secondary-button" type="button">分享房间信息</button>
             <button id="btn-cancel-waiting" class="secondary-button ghost" type="button">取消</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- Result Modal -->
+      <div id="result-modal" class="modal-overlay hidden">
+        <div class="modal-shell result-shell">
+          <div class="result-icon" id="result-icon">🏆</div>
+          <h2 id="result-winner">游戏结束</h2>
+          <p id="result-reason" class="result-reason"></p>
+          <div class="result-actions">
+            <button id="btn-result-lobby" class="primary-button" type="button">返回大厅</button>
+            <button id="btn-result-rematch" class="secondary-button" type="button">再来一局</button>
           </div>
         </div>
       </div>

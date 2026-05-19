@@ -1,0 +1,47 @@
+name: 构建 Android APK
+
+on:
+  push:
+    branches: [master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: 检出代码
+        uses: actions/checkout@v4
+
+      - name: 设置 Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 设置 Java JDK
+        uses: actions/setup-java@v4
+        with:
+          distribution: zulu
+          java-version: 17
+
+      - name: 构建前端
+        run: npm run build
+        env:
+          VITE_RELAY_URL: wss://geniying-billiards.zeabur.app/ws
+
+      - name: 同步 Capacitor
+        run: npx cap sync android
+
+      - name: 构建 APK
+        run: cd android && ./gradlew assembleDebug
+
+      - name: 上传 APK
+        uses: actions/upload-artifact@v4
+        with:
+          name: geniying-pro-billiards-debug
+          path: android/app/build/outputs/apk/debug/app-debug.apk
+          retention-days: 30

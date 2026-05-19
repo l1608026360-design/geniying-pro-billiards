@@ -12,6 +12,8 @@ const distDir = path.join(rootDir, 'dist');
 const port = Number(process.env.PORT || 8787);
 const host = process.env.HOST || '0.0.0.0';
 const ROOM_CODE_PATTERN = /^\d{4}$/;
+const HEARTBEAT_INTERVAL = 30000;
+const ROOM_TTL = 30 * 60 * 1000; // 30 minutes
 
 const contentTypes = {
   '.css': 'text/css; charset=utf-8',
@@ -38,6 +40,14 @@ function send(socket, payload) {
 function roomOf(socket) {
   const meta = sockets.get(socket);
   return meta ? rooms.get(meta.roomCode) : null;
+}
+
+function timestamp() {
+  return new Date().toISOString().replace('T', ' ').slice(0, 19);
+}
+
+function log(...args) {
+  console.log(`[${timestamp()}]`, ...args);
 }
 
 function createRoomCode(preferredCode = '') {
@@ -118,8 +128,10 @@ function handleCreateRoom(socket, message) {
     host: socket,
     guest: null,
     state: message.state ?? null,
+    createdAt: Date.now(),
   });
   sockets.set(socket, { roomCode, role: 1 });
+  log(`房间 ${roomCode} 已创建 (当前活跃: ${rooms.size})`);
 
   send(socket, {
     type: 'room-created',
@@ -142,6 +154,7 @@ function handleJoinRoom(socket, message) {
 
   room.guest = socket;
   sockets.set(socket, { roomCode: room.roomCode, role: 2 });
+  log(`玩家加入房间 ${room.roomCode}`);
 
   send(room.host, {
     type: 'room-ready',
@@ -271,10 +284,57 @@ const server = http.createServer((req, res) => {
 
 const wss = new WebSocketServer({ noServer: true });
 
-wss.on('connection', (socket) => {
+// Heartbeat - detect dead connections
+function heartbeat() {
+  wss.clients.forEach((ws) => {
+    if (ws.isAlive === false) {
+      log('心跳超时，断开连接');
+      return ws.terminate();
+    }
+    ws.isAlive = false;
+    ws.ping();
+  });
+}
+
+const heartbeatTimer = setInterval(heartbeat, HEARTBEAT_INTERVAL);
+
+// Room TTL cleanup - remove stale rooms every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [code, room] of rooms) {
+    if (now - room.createdAt > ROOM_TTL) {
+      log(`房间 ${code} 超时，自动清理`);
+      if (room.host) {
+        send(room.host, { type: 'room-closed', message: '房间已超时' });
+        sockets.delete(room.host);
+      }
+      if (room.guest) {
+        send(room.guest, { type: 'room-closed', message: '房间已超时' });
+        sockets.delete(room.guest);
+      }
+      rooms.delete(code);
+    }
+  }
+}, 300000);
+
+wss.on('connection', (socket, req) => {
+  const ip = req.headers['x-forwarded-for']?.split(',')[0]?.trim() || req.socket.remoteAddress || 'unknown';
+  log(`WebSocket 连接来自 ${ip}`);
+  socket.isAlive = true;
+
+  socket.on('pong', () => {
+    socket.isAlive = true;
+  });
+
   socket.on('message', (raw) => handleSocketMessage(socket, raw));
-  socket.on('close', () => leaveRoom(socket, 'player-left'));
-  socket.on('error', () => leaveRoom(socket, 'player-left'));
+  socket.on('close', () => {
+    log(`连接断开 ${ip}`);
+    leaveRoom(socket, 'player-left');
+  });
+  socket.on('error', (err) => {
+    log(`连接错误 ${ip}: ${err.message}`);
+    leaveRoom(socket, 'player-left');
+  });
 });
 
 server.on('upgrade', (req, socket, head) => {
@@ -301,9 +361,19 @@ server.listen(port, host, () => {
     }
   }
 
-  console.log('GeniYing Pro Billiards relay server ready:');
+  log('思颖竞技台球 中继服务器已启动:');
   for (const url of urls) {
-    console.log(`  ${url}`);
+    log(`  ${url}`);
   }
-  console.log(`WebSocket endpoint: ws://<same-host>:${port}/ws`);
+  log(`WebSocket endpoint: ws://<same-host>:${port}/ws`);
 });
+
+// Graceful shutdown
+function shutdown() {
+  log('服务器关闭中...');
+  clearInterval(heartbeatTimer);
+  wss.clients.forEach((ws) => ws.close());
+  server.close(() => process.exit(0));
+}
+process.on('SIGTERM', shutdown);
+process.on('SIGINT', shutdown);

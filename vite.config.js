@@ -13,4 +13,7 @@ export default defineConfig({
   build: {
     target: 'es2020',
   },
+  define: {
+    __DEFAULT_RELAY_URL__: JSON.stringify(process.env.VITE_RELAY_URL || ''),
+  },
 });

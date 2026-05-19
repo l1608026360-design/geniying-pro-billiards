@@ -13,6 +13,7 @@ import {
   createBalls,
   chooseAiPlan,
   describePocketedBall,
+  evaluateTurn,
   exportGameState,
   getAimingGuide,
   getCueBall,
@@ -109,6 +110,12 @@ const appState = {
   discoveredRooms: [],
   scanActive: false,
   installPrompt: null,
+  // 8-ball game state
+  playerRoles: { 1: 'unassigned', 2: 'unassigned' },
+  scored: { 1: [], 2: [] },
+  fouls: { 1: 0, 2: 0 },
+  gameResult: null,
+  previousActiveCount: 0,
 };
 
 function isHostedWebPage() {
@@ -147,7 +154,9 @@ function normalizeRelayUrl(value) {
 
 function deriveAutoRelayUrl() {
   if (!isHostedWebPage() || isNativeAndroidApp()) {
-    return '';
+    // Use the build-time injected default URL for native apps
+    const defaultUrl = (typeof __DEFAULT_RELAY_URL__ !== 'undefined' && __DEFAULT_RELAY_URL__) || '';
+    return normalizeRelayUrl(defaultUrl);
   }
   const protocol = window.location.protocol === 'https:' ? 'wss' : 'ws';
   return normalizeRelayUrl(`${protocol}://${window.location.host}/ws`);
@@ -253,9 +262,16 @@ function applyImportedState(rawState) {
   appState.balls = next.balls;
   appState.currentTurn = next.currentTurn;
   appState.isFreeBall = next.isFreeBall;
+  appState.playerRoles = next.playerRoles;
+  appState.scored = next.scored;
+  appState.fouls = next.fouls;
+  appState.gameResult = next.gameResult;
   appState.awaitingAuthoritativeSync = false;
   updateUI();
   draw();
+  if (appState.gameResult) {
+    showGameResult(appState.gameResult);
+  }
 }
 
 function resetRack() {
@@ -267,6 +283,11 @@ function resetRack() {
   dragState.active = false;
   appState.aiThinking = false;
   window.clearTimeout(appState.aiTurnTimer);
+  appState.playerRoles = { 1: 'unassigned', 2: 'unassigned' };
+  appState.scored = { 1: [], 2: [] };
+  appState.fouls = { 1: 0, 2: 0 };
+  appState.gameResult = null;
+  appState.previousActiveCount = 0;
 }
 
 function humanCanAct() {
@@ -283,6 +304,12 @@ function humanCanAct() {
 }
 
 function updateUI() {
+  if (appState.gameResult) {
+    return;
+  }
+  const roleType = appState.playerRoles[appState.playerRole] || 'unassigned';
+  const roleLabel = roleType === 'solid' ? '红球 (1-7)' : roleType === 'stripe' ? '花球 (9-15)' : '未分配';
+
   if (appState.gameMode === 'single') {
     el.roleDisplay.textContent = appState.currentTurn === 1 ? '红球方 (1-7)' : '花球方 (9-15)';
     setTurnText(
@@ -293,7 +320,7 @@ function updateUI() {
   }
 
   if (appState.gameMode === 'ai') {
-    el.roleDisplay.textContent = '你是红球方 (1-7) / AI 是花球方 (9-15)';
+    el.roleDisplay.textContent = `你是红球方 (1-7) / AI 是花球方 (9-15)`;
     if (appState.currentTurn === 1) {
       setTurnText(appState.isFreeBall ? '你的自由球，先摆白球再击球' : '你的回合', 'active');
     } else if (appState.aiThinking) {
@@ -304,7 +331,7 @@ function updateUI() {
     return;
   }
 
-  el.roleDisplay.textContent = appState.playerRole === 1 ? '你是红球方 (1-7)' : '你是花球方 (9-15)';
+  el.roleDisplay.textContent = roleLabel;
   if (appState.awaitingAuthoritativeSync) {
     setTurnText('正在等待房主同步球桌状态...', 'warning');
     return;
@@ -633,11 +660,47 @@ function startGame(mode) {
   resize();
 }
 
-function finishTurnAuthoritatively() {
+function finishTurnAuthoritatively(pocketedBallIds) {
   appState.isMoving = false;
   const cue = getCueBall(appState.balls);
-  let foul = false;
+  const currentTurn = appState.currentTurn;
 
+  // Detect newly potted balls since last check
+  const pottedThisTurn = (pocketedBallIds || []).filter((id) => {
+    const ball = appState.balls.find((b) => b.id === id);
+    return ball && !ball.active;
+  });
+
+  // If cue ball is not active, add it to potted list
+  if (cue && !cue.active && !pottedThisTurn.includes(0)) {
+    pottedThisTurn.push(0);
+  }
+
+  // Evaluate the turn using 8-ball rules
+  const result = evaluateTurn(appState, pottedThisTurn);
+
+  let foul = false;
+  let freeBall = false;
+
+  if (result.gameResult) {
+    // Game over
+    appState.gameResult = result.gameResult;
+    appState.playerRoles = result.newPlayerRoles;
+    appState.scored = result.newScored;
+    appState.fouls = result.newFouls;
+    appState.currentTurn = result.gameResult.winner;
+    appState.isFreeBall = false;
+    appState.awaitingAuthoritativeSync = false;
+    updateUI();
+    draw();
+    showGameResult(result.gameResult);
+    return;
+  }
+
+  foul = result.foul || result.isFreeBall;
+  freeBall = result.isFreeBall;
+
+  // Handle cue ball if potted
   if (cue && !cue.active) {
     cue.active = true;
     cue.x = GAME_WIDTH / 2;
@@ -645,10 +708,22 @@ function finishTurnAuthoritatively() {
     cue.vx = 0;
     cue.vy = 0;
     foul = true;
+    freeBall = true;
   }
 
-  appState.currentTurn = appState.currentTurn === 1 ? 2 : 1;
-  appState.isFreeBall = foul;
+  appState.playerRoles = result.newPlayerRoles;
+  appState.scored = result.newScored;
+  appState.fouls = result.newFouls;
+
+  if (result.assigned) {
+    const label = result.assigned === 'solid' ? '红球 (1-7)' : '花球 (9-15)';
+    showToast(`你被分配为 ${label}`);
+  }
+
+  if (result.switchTurn) {
+    appState.currentTurn = currentTurn === 1 ? 2 : 1;
+  }
+  appState.isFreeBall = freeBall;
   appState.awaitingAuthoritativeSync = false;
   updateUI();
   draw();
@@ -658,10 +733,10 @@ function finishTurnAuthoritatively() {
   }
 }
 
-function finishMotion() {
+function finishMotion(pocketedBallIds) {
   if (appState.gameMode === 'online') {
     if (appState.isHost) {
-      finishTurnAuthoritatively();
+      finishTurnAuthoritatively(pocketedBallIds);
       appState.activeTransport?.send({
         type: 'state-sync',
         roomCode: appState.currentRoomCode,
@@ -676,8 +751,33 @@ function finishMotion() {
     return;
   }
 
-  finishTurnAuthoritatively();
+  finishTurnAuthoritatively(pocketedBallIds);
 }
+
+// ===== Game Result UI =====
+
+function showGameResult(gameResult) {
+  const isWinner = gameResult.winner === appState.playerRole;
+  const winnerText = isWinner ? '🎉 你赢了！' : '😞 你输了';
+  const reasonText =
+    gameResult.reason === '8ball-potted'
+      ? '干净打入8号球，清台胜利！'
+      : gameResult.reason === 'before-8-foul'
+        ? isWinner
+          ? '对方违规打入8号球，你获胜！'
+          : '你提前打入8号球，对方获胜'
+        : '比赛结束';
+
+  document.getElementById('result-winner').textContent = winnerText;
+  document.getElementById('result-reason').textContent = reasonText;
+  document.getElementById('result-modal').classList.remove('hidden');
+}
+
+function hideGameResult() {
+  document.getElementById('result-modal').classList.add('hidden');
+}
+
+// ===== Physics & Turn Management =====
 
 function physicsLoop() {
   if (!appState.isMoving) {
@@ -693,7 +793,7 @@ function physicsLoop() {
   if (stillMoving) {
     window.requestAnimationFrame(physicsLoop);
   } else {
-    finishMotion();
+    finishMotion(pocketed);
   }
 }
 
@@ -982,6 +1082,7 @@ async function cleanupOnlineSession({ notify = true } = {}) {
 }
 
 async function returnToLobby(message, notifyServer = false) {
+  hideGameResult();
   await cleanupOnlineSession({ notify: notifyServer });
   resetRack();
   appState.gameMode = 'single';
@@ -1548,6 +1649,20 @@ function bindEvents() {
   });
   el.waitingRoomId.addEventListener('click', () => {
     void shareRoomInfo();
+  });
+
+  // Result modal buttons
+  document.getElementById('btn-result-lobby')?.addEventListener('click', () => {
+    hideGameResult();
+    void returnToLobby('', true);
+  });
+  document.getElementById('btn-result-rematch')?.addEventListener('click', () => {
+    hideGameResult();
+    if (appState.gameMode === 'ai') {
+      void startAiBattle();
+    } else {
+      void startPractice();
+    }
   });
 
   el.inputRelayRoom.addEventListener('input', () => {

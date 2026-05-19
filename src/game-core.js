@@ -111,11 +111,15 @@ export function getTargetBallsForRole(balls, role) {
   return eightBall ? [eightBall] : balls.filter((ball) => ball.active && ball.id !== 0);
 }
 
-export function exportGameState({ balls, currentTurn, isFreeBall }) {
+export function exportGameState({ balls, currentTurn, isFreeBall, playerRoles, scored, fouls, gameResult }) {
   return {
     balls: deepClone(balls),
     turn: currentTurn,
     isFreeBall,
+    playerRoles: playerRoles || { 1: 'unassigned', 2: 'unassigned' },
+    scored: scored || { 1: [], 2: [] },
+    fouls: fouls || { 1: 0, 2: 0 },
+    gameResult: gameResult || null,
   };
 }
 
@@ -124,6 +128,10 @@ export function importGameState(rawState) {
     balls: deepClone(rawState?.balls || createBalls()),
     currentTurn: rawState?.turn === 2 ? 2 : 1,
     isFreeBall: Boolean(rawState?.isFreeBall),
+    playerRoles: rawState?.playerRoles || { 1: 'unassigned', 2: 'unassigned' },
+    scored: rawState?.scored || { 1: [], 2: [] },
+    fouls: rawState?.fouls || { 1: 0, 2: 0 },
+    gameResult: rawState?.gameResult || null,
   };
 }
 
@@ -539,4 +547,129 @@ export function describePocketedBall(id) {
     return '8 号球落袋';
   }
   return `${id} 号球落袋`;
+}
+
+export function isSolid(id) {
+  return id >= 1 && id <= 7;
+}
+
+export function isStripe(id) {
+  return id >= 9 && id <= 15;
+}
+
+export function getBallType(id) {
+  if (id === 0) return 'cue';
+  if (id === 8) return '8ball';
+  if (isSolid(id)) return 'solid';
+  if (isStripe(id)) return 'stripe';
+  return 'unknown';
+}
+
+export function hasWon(gameResult) {
+  return gameResult !== null;
+}
+
+/**
+ * Evaluate the result of a completed turn.
+ * Returns { foul, isFreeBall, switchTurn, potted, assigned, scored, gameResult }
+ *
+ * @param {object} state - Current game state
+ * @param {number[]} newlyPotted - IDs of balls potted this turn (empty=miss)
+ * @param {number} currentTurn - Which player (1 or 2) just shot
+ */
+export function evaluateTurn({ playerRoles, scored, fouls, currentTurn, balls }, newlyPotted) {
+  const role = currentTurn;
+  const opponent = role === 1 ? 2 : 1;
+  let result = {
+    foul: false,
+    switchTurn: false,
+    isFreeBall: false,
+    potted: newlyPotted,
+    assigned: null,       // set when a player's type is first determined
+    newScored: scored ? { ...scored, [role]: [...(scored[role] || [])] } : { 1: [], 2: [] },
+    newFouls: fouls ? { ...fouls } : { 1: 0, 2: 0 },
+    gameResult: null,
+    newPlayerRoles: playerRoles ? { ...playerRoles } : { 1: 'unassigned', 2: 'unassigned' },
+  };
+
+  const cuePotted = newlyPotted.includes(0);
+  const eightPotted = newlyPotted.includes(8);
+  // Non-8, non-cue potted balls
+  const objectBallsPotted = newlyPotted.filter((id) => id !== 0 && id !== 8);
+  const roleType = result.newPlayerRoles[role];
+
+  // --- Win / Loss conditions involving 8-ball ---
+  if (eightPotted) {
+    const roleTargetsRemaining = getRemainingOfType(balls, role, result.newPlayerRoles);
+    if (cuePotted || roleTargetsRemaining > 0) {
+      // 8-ball potted before all targets are cleared, or with a scratch → LOSS
+      result.gameResult = { winner: opponent, reason: 'before-8-foul' };
+    } else {
+      // All targets cleared, 8-ball potted cleanly → WIN
+      result.gameResult = { winner: role, reason: '8ball-potted' };
+    }
+    result.switchTurn = true;
+    result.foul = cuePotted;
+    result.isFreeBall = false;
+    return result;
+  }
+
+  // --- Cue ball foul ---
+  if (cuePotted) {
+    result.foul = true;
+    result.switchTurn = true;
+    result.isFreeBall = true;
+    result.newFouls[role] += 1;
+    return result;
+  }
+
+  // --- No ball potted (miss) ---
+  if (objectBallsPotted.length === 0) {
+    // No ball potted = switch turn, not a foul (in standard bar rules this is just a miss)
+    result.switchTurn = true;
+    return result;
+  }
+
+  // --- Balls were potted ---
+  // If type not yet assigned, assign based on first potted ball
+  if (roleType === 'unassigned') {
+    const firstPottedType = getBallType(objectBallsPotted[0]);
+    if (firstPottedType === 'solid' || firstPottedType === 'stripe') {
+      result.newPlayerRoles[role] = firstPottedType;
+      result.newPlayerRoles[opponent] = firstPottedType === 'solid' ? 'stripe' : 'solid';
+      result.assigned = firstPottedType;
+    }
+  }
+
+  const assignedType = result.newPlayerRoles[role];
+  let legalPotted = 0;
+  let illegalPotted = 0;
+
+  for (const id of objectBallsPotted) {
+    if (getBallType(id) === assignedType) {
+      legalPotted += 1;
+      result.newScored[role].push(id);
+    } else {
+      illegalPotted += 1;
+    }
+  }
+
+  // Foul: potted opponent's ball
+  if (illegalPotted > 0 && assignedType !== 'unassigned') {
+    result.foul = true;
+    result.isFreeBall = true;
+    result.newFouls[role] += 1;
+    result.switchTurn = true;
+    return result;
+  }
+
+  // Legal pot: player continues
+  result.switchTurn = false;
+  return result;
+}
+
+function getRemainingOfType(balls, role, playerRoles) {
+  const type = playerRoles[role];
+  if (!type || type === 'unassigned') return 99;
+  return balls.filter((b) => b.active && getBallType(b.id) === type).length;
 }

@@ -589,6 +589,34 @@ input:focus {
   margin-top: 16px;
 }
 
+/* Result Modal */
+.result-shell {
+  text-align: center;
+}
+
+.result-icon {
+  font-size: 72px;
+  line-height: 1;
+  margin-bottom: 8px;
+}
+
+.result-shell h2 {
+  margin: 0;
+  font-size: 28px;
+}
+
+.result-reason {
+  color: rgba(226, 232, 240, 0.74);
+  margin: 8px 0 0;
+}
+
+.result-shell .result-actions {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 10px;
+  margin-top: 20px;
+}
+
 #orientation-mask {
   position: fixed;
   inset: 0;
